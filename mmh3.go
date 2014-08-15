@@ -26,7 +26,7 @@ func Hash32(key []byte) uint32 {
 		binary.Read(buf, binary.LittleEndian, &k)
 		k *= h32c1
 		k = (k << 15) | (k >> (32 - 15))
-		k *= h32c1
+		k *= h32c2
 		h ^= k
 		h = (h << 13) | (h >> (32 - 13))
 		h = (h * 5) + 0xe6546b64
