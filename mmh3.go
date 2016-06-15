@@ -1,7 +1,6 @@
 package mmh3
 
 import (
-	"bytes"
 	"encoding/binary"
 	"reflect"
 	"unsafe"
@@ -21,9 +20,8 @@ func Hash32(key []byte) uint32 {
 	}
 	nblocks := length / 4
 	var h, k uint32
-	buf := bytes.NewBuffer(key)
 	for i := 0; i < nblocks; i++ {
-		binary.Read(buf, binary.LittleEndian, &k)
+		k = binary.LittleEndian.Uint32(key[i*4:])
 		k *= h32c1
 		k = (k << 15) | (k >> (32 - 15))
 		k *= h32c2
@@ -58,18 +56,15 @@ func Hash32(key []byte) uint32 {
 
 func Hash128(key []byte) []byte {
 	length := len(key)
-	ret := new(bytes.Buffer)
+	ret := make([]byte, 16)
 	if length == 0 {
-		binary.Write(ret, binary.LittleEndian, uint64(0))
-		binary.Write(ret, binary.LittleEndian, uint64(0))
-		return ret.Bytes()
+		return ret
 	}
 	nblocks := length / 16
 	var h1, h2, k1, k2 uint64
-	buf := bytes.NewBuffer(key)
 	for i := 0; i < nblocks; i++ {
-		binary.Read(buf, binary.LittleEndian, &k1)
-		binary.Read(buf, binary.LittleEndian, &k2)
+		k1 = binary.LittleEndian.Uint64(key[i*16:])
+		k2 = binary.LittleEndian.Uint64(key[(i*16)+8:])
 		k1 *= h64c1
 		k1 = (k1 << 31) | (k1 >> (64 - 31))
 		k1 *= h64c2
@@ -157,9 +152,9 @@ func Hash128(key []byte) []byte {
 	h2 ^= h2 >> 33
 	h1 += h2
 	h2 += h1
-	binary.Write(ret, binary.LittleEndian, h1)
-	binary.Write(ret, binary.LittleEndian, h2)
-	return ret.Bytes()
+	binary.LittleEndian.PutUint64(ret[:], h1)
+	binary.LittleEndian.PutUint64(ret[8:], h2)
+	return ret
 }
 
 // Hash128x64 is a version of MurmurHash which is designed to run only on
