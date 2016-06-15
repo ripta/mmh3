@@ -317,6 +317,26 @@ func (hw *HashWriter128) Write(b []byte) (int, error) {
 	return total, nil
 }
 
+func (hw *HashWriter128) WriteString(s string) (int, error) {
+	total := 0
+	// fill the buffer, then update the internal state
+	// of this hash
+	for len(s) != 0 {
+		n := copy(hw.buf[hw.index:], s)
+		total += n
+		s = s[n:]
+		hw.index += n
+		if hw.index != 16 {
+			hw.written += int64(total)
+			return total, nil
+		}
+		hw.updateState()
+	}
+	hw.written += int64(total)
+	return total, nil
+	
+}
+
 func (hw *HashWriter128) updateState() {
 	hw.index = 0
 	k1 := binary.LittleEndian.Uint64(hw.buf[:])

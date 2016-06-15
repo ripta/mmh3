@@ -55,5 +55,12 @@ func TestHashWriter128(t *testing.T) {
 	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
 		t.Fatal("128bit hello")
 	}
+	str := "Winter is coming"
+	h.Reset()
+	h.WriteString(str)
+	res = h.Sum(nil)
+	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
+		t.Fatal("128bit hello")
+	}
 
 }
