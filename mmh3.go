@@ -274,3 +274,154 @@ func Hash128x64(key []byte) []byte {
 	rh.Len = 16
 	return ret
 }
+
+type HashWriter128 struct {
+	buf     [16]byte
+	h1, h2  uint64
+	index   int
+	written int64
+}
+
+func (hw *HashWriter128) Reset() {
+	hw.buf = [16]byte{}
+	hw.h1 = 0
+	hw.h2 = 0
+	hw.index = 0
+	hw.written = 0
+}
+
+func (hw *HashWriter128) Size() int {
+	return 16
+}
+
+func (hw *HashWriter128) BlockSize() int {
+	return 16
+}
+
+func (hw *HashWriter128) Write(b []byte) (int, error) {
+	total := 0
+	// fill the buffer, then update the internal state
+	// of this hash
+	for len(b) != 0 {
+		n := copy(hw.buf[hw.index:], b)
+		total += n
+		b = b[n:]
+		hw.index += n
+		if hw.index != 16 {
+			hw.written += int64(total)
+			return total, nil
+		}
+		hw.updateState()
+	}
+	hw.written += int64(total)
+	return total, nil
+}
+
+func (hw *HashWriter128) updateState() {
+	hw.index = 0
+	k1 := binary.LittleEndian.Uint64(hw.buf[:])
+	k2 := binary.LittleEndian.Uint64(hw.buf[8:])
+	h1 := hw.h1
+	h2 := hw.h2
+
+	k1 *= h64c1
+	k1 = (k1 << 31) | (k1 >> (64 - 31))
+	k1 *= h64c2
+	h1 ^= k1
+	h1 = (h1 << 27) | (h1 >> (64 - 27))
+	h1 += h2
+	h1 = h1*5 + 0x52dce729
+	k2 *= h64c2
+	k2 = (k2 << 33) | (k2 >> (64 - 33))
+	k2 *= h64c1
+	h2 ^= k2
+	h2 = (h2 << 31) | (h2 >> (64 - 31))
+	h2 += h1
+	h2 = h2*5 + 0x38495ab5
+
+	hw.h1 = h1
+	hw.h2 = h2
+}
+
+func (hw *HashWriter128) Sum(b []byte) []byte {
+	k1 := uint64(0)
+	k2 := uint64(0)
+	h1 := hw.h1
+	h2 := hw.h2
+	switch hw.index {
+	case 15:
+		k2 ^= uint64(hw.buf[14]) << 48
+		fallthrough
+	case 14:
+		k2 ^= uint64(hw.buf[13]) << 40
+		fallthrough
+	case 13:
+		k2 ^= uint64(hw.buf[12]) << 32
+		fallthrough
+	case 12:
+		k2 ^= uint64(hw.buf[11]) << 24
+		fallthrough
+	case 11:
+		k2 ^= uint64(hw.buf[10]) << 16
+		fallthrough
+	case 10:
+		k2 ^= uint64(hw.buf[9]) << 8
+		fallthrough
+	case 9:
+		k2 ^= uint64(hw.buf[8])
+		k2 *= h64c2
+		k2 = (k2 << 33) | (k2 >> (64 - 33))
+		k2 *= h64c1
+		h2 ^= k2
+		fallthrough
+	case 8:
+		k1 ^= uint64(hw.buf[7]) << 56
+		fallthrough
+	case 7:
+		k1 ^= uint64(hw.buf[6]) << 48
+		fallthrough
+	case 6:
+		k1 ^= uint64(hw.buf[5]) << 40
+		fallthrough
+	case 5:
+		k1 ^= uint64(hw.buf[4]) << 32
+		fallthrough
+	case 4:
+		k1 ^= uint64(hw.buf[3]) << 24
+		fallthrough
+	case 3:
+		k1 ^= uint64(hw.buf[2]) << 16
+		fallthrough
+	case 2:
+		k1 ^= uint64(hw.buf[1]) << 8
+		fallthrough
+	case 1:
+		k1 ^= uint64(hw.buf[0])
+		k1 *= h64c1
+		k1 = (k1 << 31) | (k1 >> (64 - 31))
+		k1 *= h64c2
+		h1 ^= k1
+	}
+	h1 ^= uint64(hw.written)
+	h2 ^= uint64(hw.written)
+	h1 += h2
+	h2 += h1
+	h1 ^= h1 >> 33
+	h1 *= 0xff51afd7ed558ccd
+	h1 ^= h1 >> 33
+	h1 *= 0xc4ceb9fe1a85ec53
+	h1 ^= h1 >> 33
+	h2 ^= h2 >> 33
+	h2 *= 0xff51afd7ed558ccd
+	h2 ^= h2 >> 33
+	h2 *= 0xc4ceb9fe1a85ec53
+	h2 ^= h2 >> 33
+	h1 += h2
+	h2 += h1
+	var retbuf [8]byte
+	binary.LittleEndian.PutUint64(retbuf[:], h1)
+	b = append(b, retbuf[:]...)
+	binary.LittleEndian.PutUint64(retbuf[:], h2)
+	b = append(b, retbuf[:]...)
+	return b
+}
