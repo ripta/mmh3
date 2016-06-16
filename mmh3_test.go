@@ -39,3 +39,28 @@ func Testx64(t *testing.T) {
 	}
 
 }
+
+func TestHashWriter128(t *testing.T) {
+	s := []byte("hello")
+	h := HashWriter128{}
+	h.Write(s)
+	res := h.Sum(nil)
+	if fmt.Sprintf("%x", res) != "029bbd41b3a7d8cb191dae486a901e5b" {
+		t.Fatal("128bit hello")
+	}
+	s = []byte("Winter is coming")
+	h.Reset()
+	h.Write(s)
+	res = h.Sum(nil)
+	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
+		t.Fatal("128bit hello")
+	}
+	str := "Winter is coming"
+	h.Reset()
+	h.WriteString(str)
+	res = h.Sum(nil)
+	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
+		t.Fatal("128bit hello")
+	}
+
+}
