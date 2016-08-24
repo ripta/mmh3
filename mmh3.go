@@ -334,7 +334,7 @@ func (hw *HashWriter128) WriteString(s string) (int, error) {
 	}
 	hw.written += int64(total)
 	return total, nil
-	
+
 }
 
 func (hw *HashWriter128) updateState() {
