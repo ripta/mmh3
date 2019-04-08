@@ -23,7 +23,7 @@ func TestAll(t *testing.T) {
 }
 
 // Test the x64 optimized hash against Hash128
-func Testx64(t *testing.T) {
+func TestOptimizedX64(t *testing.T) {
 	keys := []string{
 		"hello",
 		"Winter is coming",
