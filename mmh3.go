@@ -157,14 +157,22 @@ func Hash128(key []byte) []byte {
 	return ret
 }
 
-// Hash128x64 is a version of MurmurHash which is designed to run only on
-// little-endian processors.  It is considerably faster for those processors
-// than Hash128.
+// Hash128x64 calls WriteHash128x64 with an allocated output buffer
 func Hash128x64(key []byte) []byte {
-	length := len(key)
 	ret := make([]byte, 16)
+	if len(key) > 0 {
+		WriteHash128x64(key, ret)
+	}
+	return ret
+}
+
+// WriteHash128x64 is a version of MurmurHash which is designed to run only on
+// little-endian processors.  It is considerably faster for those processors
+// than Hash128.  The hash is written to the first two bytes of ret
+func WriteHash128x64(key, ret []byte) {
+	length := len(key)
 	if length == 0 {
-		return ret
+		return
 	}
 
 	rh := *(*reflect.SliceHeader)(unsafe.Pointer(&ret))
@@ -272,7 +280,6 @@ func Hash128x64(key []byte) []byte {
 	b[0] = h1
 	b[1] = h2
 	rh.Len = 16
-	return ret
 }
 
 type HashWriter128 struct {
