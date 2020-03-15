@@ -2,6 +2,8 @@ package mmh3
 
 import (
 	"bufio"
+
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"github.com/stretchr/testify/assert"
@@ -54,54 +56,60 @@ func TestAll(t *testing.T) {
 	if Hash32(s) != 0x248bfa47 {
 		t.Fatal("32bit hello")
 	}
-	if fmt.Sprintf("%x", Hash128(s)) != "029bbd41b3a7d8cb191dae486a901e5b" {
+	if fmt.Sprintf("%x", Hash128(s).Bytes()) != "029bbd41b3a7d8cb191dae486a901e5b" {
 		t.Fatal("128bit hello")
 	}
 	s = []byte("Winter is coming")
 	if Hash32(s) != 0x43617e8f {
 		t.Fatal("32bit winter")
 	}
-	if fmt.Sprintf("%x", Hash128(s)) != "95eddc615d3b376c13fb0b0cead849c5" {
+	if fmt.Sprintf("%x", Hash128(s).Bytes()) != "95eddc615d3b376c13fb0b0cead849c5" {
 		t.Fatal("128bit winter")
 	}
 }
 
-// Test the x64 optimized hash against Hash128
-func TestOptimizedX64(t *testing.T) {
-	keys := []string{
-		"hello",
-		"Winter is coming",
-	}
+func Test128Values(t *testing.T) {
+	key := []byte("hello world")
 
-	for _, k := range keys {
-		h128 := Hash128([]byte(k))
-		h128x64 := Hash128x64([]byte(k))
+	h := Hash128(key)
 
-		if string(h128) != string(h128x64) {
-			t.Fatalf("Expected same hashes for %s, but got %x and %x", k, h128, h128x64)
-		}
-	}
+	h1, h2 := h.Values()
 
+	b := h.Bytes()
+
+	out := make([]byte, 16)
+	h.Write(out)
+
+	assert.Equal(t, h1, binary.LittleEndian.Uint64(b[0:]))
+	assert.Equal(t, h2, binary.LittleEndian.Uint64(b[8:]))
+
+	assert.Equal(t, h1, binary.LittleEndian.Uint64(out[0:]))
+	assert.Equal(t, h2, binary.LittleEndian.Uint64(out[8:]))
+
+	assert.Equal(t, b, Hash128x64(key))
+
+	WriteHash128x64(key, out)
+	assert.Equal(t, b, out)
 }
 
 func TestHashWriter128(t *testing.T) {
 	s := []byte("hello")
 	h := HashWriter128{}
-	h.Write(s)
+	_, _ = h.Write(s)
 	res := h.Sum(nil)
 	if fmt.Sprintf("%x", res) != "029bbd41b3a7d8cb191dae486a901e5b" {
 		t.Fatal("128bit hello")
 	}
 	s = []byte("Winter is coming")
 	h.Reset()
-	h.Write(s)
+	_, _ = h.Write(s)
 	res = h.Sum(nil)
 	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
 		t.Fatal("128bit hello")
 	}
 	str := "Winter is coming"
 	h.Reset()
-	h.WriteString(str)
+	_, _ = h.WriteString(str)
 	res = h.Sum(nil)
 	if fmt.Sprintf("%x", res) != "95eddc615d3b376c13fb0b0cead849c5" {
 		t.Fatal("128bit hello")

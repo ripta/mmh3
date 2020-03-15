@@ -13,6 +13,38 @@ const (
 	h64c2 uint64 = 0x4cf5ad432745937f
 )
 
+type Hash128Value struct {
+	high, low uint64
+}
+
+// Values returns the two 8 byte values that compose the hash
+func (h Hash128Value) Values() (uint64, uint64) {
+	return h.high, h.low
+}
+
+// Write writes the hash to given buffer which should be 16 bytes long
+func (h Hash128Value) Write(out []byte) {
+	if len(out) != 16 {
+		panic("provided return buffer should be 16 bytes")
+	}
+
+	rh := *(*reflect.SliceHeader)(unsafe.Pointer(&out))
+	rh.Len = 2
+
+	b := *(*[]uint64)(unsafe.Pointer(&rh))
+	b[0] = h.high
+	b[1] = h.low
+
+	rh.Len = 16
+}
+
+// Bytes returns the 16 bytes that compose the hash
+func (h Hash128Value) Bytes() []byte {
+	b := make([]byte, 16)
+	h.Write(b)
+	return b
+}
+
 func Hash32(key []byte) uint32 {
 	length := len(key)
 	if length == 0 {
@@ -54,131 +86,12 @@ func Hash32(key []byte) uint32 {
 	return h
 }
 
-func Hash128(key []byte) []byte {
-	length := len(key)
-	ret := make([]byte, 16)
-	if length == 0 {
-		return ret
-	}
-	nblocks := length / 16
-	var h1, h2, k1, k2 uint64
-	for i := 0; i < nblocks; i++ {
-		k1 = binary.LittleEndian.Uint64(key[i*16:])
-		k2 = binary.LittleEndian.Uint64(key[(i*16)+8:])
-		k1 *= h64c1
-		k1 = (k1 << 31) | (k1 >> (64 - 31))
-		k1 *= h64c2
-		h1 ^= k1
-		h1 = (h1 << 27) | (h1 >> (64 - 27))
-		h1 += h2
-		h1 = h1*5 + 0x52dce729
-		k2 *= h64c2
-		k2 = (k2 << 33) | (k2 >> (64 - 33))
-		k2 *= h64c1
-		h2 ^= k2
-		h2 = (h2 << 31) | (h2 >> (64 - 31))
-		h2 += h1
-		h2 = h2*5 + 0x38495ab5
-	}
-	k1, k2 = 0, 0
-	tailIndex := nblocks * 16
-	switch length & 15 {
-	case 15:
-		k2 ^= uint64(key[tailIndex+14]) << 48
-		fallthrough
-	case 14:
-		k2 ^= uint64(key[tailIndex+13]) << 40
-		fallthrough
-	case 13:
-		k2 ^= uint64(key[tailIndex+12]) << 32
-		fallthrough
-	case 12:
-		k2 ^= uint64(key[tailIndex+11]) << 24
-		fallthrough
-	case 11:
-		k2 ^= uint64(key[tailIndex+10]) << 16
-		fallthrough
-	case 10:
-		k2 ^= uint64(key[tailIndex+9]) << 8
-		fallthrough
-	case 9:
-		k2 ^= uint64(key[tailIndex+8])
-		k2 *= h64c2
-		k2 = (k2 << 33) | (k2 >> (64 - 33))
-		k2 *= h64c1
-		h2 ^= k2
-		fallthrough
-	case 8:
-		k1 ^= uint64(key[tailIndex+7]) << 56
-		fallthrough
-	case 7:
-		k1 ^= uint64(key[tailIndex+6]) << 48
-		fallthrough
-	case 6:
-		k1 ^= uint64(key[tailIndex+5]) << 40
-		fallthrough
-	case 5:
-		k1 ^= uint64(key[tailIndex+4]) << 32
-		fallthrough
-	case 4:
-		k1 ^= uint64(key[tailIndex+3]) << 24
-		fallthrough
-	case 3:
-		k1 ^= uint64(key[tailIndex+2]) << 16
-		fallthrough
-	case 2:
-		k1 ^= uint64(key[tailIndex+1]) << 8
-		fallthrough
-	case 1:
-		k1 ^= uint64(key[tailIndex])
-		k1 *= h64c1
-		k1 = (k1 << 31) | (k1 >> (64 - 31))
-		k1 *= h64c2
-		h1 ^= k1
-	}
-	h1 ^= uint64(length)
-	h2 ^= uint64(length)
-	h1 += h2
-	h2 += h1
-	h1 ^= h1 >> 33
-	h1 *= 0xff51afd7ed558ccd
-	h1 ^= h1 >> 33
-	h1 *= 0xc4ceb9fe1a85ec53
-	h1 ^= h1 >> 33
-	h2 ^= h2 >> 33
-	h2 *= 0xff51afd7ed558ccd
-	h2 ^= h2 >> 33
-	h2 *= 0xc4ceb9fe1a85ec53
-	h2 ^= h2 >> 33
-	h1 += h2
-	h2 += h1
-	binary.LittleEndian.PutUint64(ret[:], h1)
-	binary.LittleEndian.PutUint64(ret[8:], h2)
-	return ret
-}
-
-// Hash128x64 calls WriteHash128x64 with an allocated output buffer
-func Hash128x64(key []byte) []byte {
-	ret := make([]byte, 16)
-	if len(key) > 0 {
-		WriteHash128x64(key, ret)
-	}
-	return ret
-}
-
-// WriteHash128x64 is a version of MurmurHash which is designed to run only on
-// little-endian processors.  It is considerably faster for those processors
-// than Hash128.  The hash is written to the output buffer which should be 16 bytes long
-func WriteHash128x64(key, ret []byte) {
+// Hash128 s a version of MurmurHash which is designed to run only on little-endian processors
+func Hash128(key []byte) Hash128Value {
 	length := len(key)
 	if length == 0 {
-		return
+		return Hash128Value{}
 	}
-	if len(ret) != 16 {
-		panic("provided return buffer should be 16 bytes")
-	}
-
-	rh := *(*reflect.SliceHeader)(unsafe.Pointer(&ret))
 
 	nblocks := length / 16
 	var h1, h2, k1, k2 uint64
@@ -278,11 +191,17 @@ func WriteHash128x64(key, ret []byte) {
 	h1 += h2
 	h2 += h1
 
-	rh.Len = 2
-	b = *(*[]uint64)(unsafe.Pointer(&rh))
-	b[0] = h1
-	b[1] = h2
-	rh.Len = 16
+	return Hash128Value{high: h1, low: h2}
+}
+
+// Hash128x64 calls WriteHash128x64 with an allocated output buffer
+func Hash128x64(key []byte) []byte {
+	return Hash128(key).Bytes()
+}
+
+// WriteHash128x64 is a
+func WriteHash128x64(key, ret []byte) {
+	Hash128(key).Write(ret)
 }
 
 type HashWriter128 struct {
