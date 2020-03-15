@@ -1,9 +1,53 @@
 package mmh3
 
 import (
+	"bufio"
+	"encoding/hex"
 	"fmt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 )
+
+func TestExpectedValues(t *testing.T) {
+	t.Run("Hash32", func(t *testing.T) {
+		readExpectedValues(t, "testdata/32/expected.txt", func(key, value string) {
+			expectedValue, err := strconv.ParseUint(value, 10, 0)
+			require.NoError(t, err)
+
+			assert.Equal(t, uint32(expectedValue), Hash32([]byte(key)))
+		})
+	})
+
+	t.Run("Hash128", func(t *testing.T) {
+		readExpectedValues(t, "testdata/128/expected.txt", func(key, value string) {
+			expectedValue, err := hex.DecodeString(value)
+			require.NoError(t, err)
+
+			assert.Equal(t, expectedValue, Hash128x64([]byte(key)))
+		})
+	})
+}
+
+func readExpectedValues(t *testing.T, filename string, lineCB func(key, value string)) {
+	f, err := os.Open(filename)
+	require.NoError(t, err)
+
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		parts := strings.SplitN(scanner.Text(), ",", 2)
+		require.Len(t, parts, 2)
+		lineCB(parts[0], parts[1])
+	}
+
+	require.NoError(t, scanner.Err())
+}
 
 func TestAll(t *testing.T) {
 	s := []byte("hello")
