@@ -2,6 +2,8 @@ package mmh3
 
 import (
 	"encoding/binary"
+	"math"
+	"math/bits"
 	"reflect"
 	"unsafe"
 )
@@ -11,6 +13,8 @@ const (
 	h32c2 uint32 = 0x1b873593
 	h64c1 uint64 = 0x87c37b91114253d5
 	h64c2 uint64 = 0x4cf5ad432745937f
+
+	h128BlockSize = 16
 )
 
 type Hash128Value struct {
@@ -94,31 +98,14 @@ func Hash128(key []byte) Hash128Value {
 	}
 
 	nblocks := length / 16
-	var h1, h2, k1, k2 uint64
+	var h1, h2 uint64
 
-	h := *(*reflect.SliceHeader)(unsafe.Pointer(&key))
-	h.Len = nblocks * 2
-	b := *(*[]uint64)(unsafe.Pointer(&h))
-	for i := 0; i < len(b); i += 2 {
-		k1, k2 = b[i], b[i+1]
-		k1 *= h64c1
-		k1 = (k1 << 31) | (k1 >> (64 - 31))
-		k1 *= h64c2
-		h1 ^= k1
-		h1 = (h1 << 27) | (h1 >> (64 - 27))
-		h1 += h2
-		h1 = h1*5 + 0x52dce729
-		k2 *= h64c2
-		k2 = (k2 << 33) | (k2 >> (64 - 33))
-		k2 *= h64c1
-		h2 ^= k2
-		h2 = (h2 << 31) | (h2 >> (64 - 31))
-		h2 += h1
-		h2 = h2*5 + 0x38495ab5
+	values := (*(*[]uint64)(unsafe.Pointer(&key)))[: nblocks*2 : nblocks*2]
+	for i := 0; i < len(values); i += 2 {
+		h1, h2 = merge128(h1, h2, values[i], values[i+1])
 	}
-	h.Len = length
 
-	k1, k2 = 0, 0
+	var k1, k2 uint64
 	tailIndex := nblocks * 16
 	switch length & 15 {
 	case 15:
@@ -142,7 +129,7 @@ func Hash128(key []byte) Hash128Value {
 	case 9:
 		k2 ^= uint64(key[tailIndex+8])
 		k2 *= h64c2
-		k2 = (k2 << 33) | (k2 >> (64 - 33))
+		k2 = bits.RotateLeft64(k2, 33)
 		k2 *= h64c1
 		h2 ^= k2
 		fallthrough
@@ -170,7 +157,7 @@ func Hash128(key []byte) Hash128Value {
 	case 1:
 		k1 ^= uint64(key[tailIndex])
 		k1 *= h64c1
-		k1 = (k1 << 31) | (k1 >> (64 - 31))
+		k1 = bits.RotateLeft64(k1, 31)
 		k1 *= h64c2
 		h1 ^= k1
 	}
@@ -199,160 +186,190 @@ func Hash128x64(key []byte) []byte {
 	return Hash128(key).Bytes()
 }
 
-// WriteHash128x64 is a
+// WriteHash128x64 creates a hash of key and writes it to ret
 func WriteHash128x64(key, ret []byte) {
 	Hash128(key).Write(ret)
 }
 
 type HashWriter128 struct {
-	buf     [16]byte
-	h1, h2  uint64
-	index   int
-	written int64
+	h1         uint64
+	h2         uint64
+	tail       [h128BlockSize]byte
+	tailLength int
+	length     int
 }
 
 func (hw *HashWriter128) Reset() {
-	hw.buf = [16]byte{}
 	hw.h1 = 0
 	hw.h2 = 0
-	hw.index = 0
-	hw.written = 0
+	hw.length = 0
+	hw.tailLength = 0
 }
 
 func (hw *HashWriter128) Size() int {
-	return 16
+	return h128BlockSize
 }
 
 func (hw *HashWriter128) BlockSize() int {
-	return 16
+	return h128BlockSize
 }
 
+// Write writes the given bytes to the hash
 func (hw *HashWriter128) Write(b []byte) (int, error) {
-	total := 0
-	// fill the buffer, then update the internal state
-	// of this hash
-	for len(b) != 0 {
-		n := copy(hw.buf[hw.index:], b)
-		total += n
-		b = b[n:]
-		hw.index += n
-		if hw.index != 16 {
-			hw.written += int64(total)
-			return total, nil
-		}
-		hw.updateState()
-	}
-	hw.written += int64(total)
-	return total, nil
+	hw.AddBytes(b)
+	return len(b), nil
 }
 
+// WriteString writes the given string to the hash
 func (hw *HashWriter128) WriteString(s string) (int, error) {
-	total := 0
-	// fill the buffer, then update the internal state
-	// of this hash
-	for len(s) != 0 {
-		n := copy(hw.buf[hw.index:], s)
-		total += n
-		s = s[n:]
-		hw.index += n
-		if hw.index != 16 {
-			hw.written += int64(total)
-			return total, nil
-		}
-		hw.updateState()
-	}
-	hw.written += int64(total)
-	return total, nil
-
+	hw.AddString(s)
+	return len(s), nil
 }
 
-func (hw *HashWriter128) updateState() {
-	hw.index = 0
-	k1 := binary.LittleEndian.Uint64(hw.buf[:])
-	k2 := binary.LittleEndian.Uint64(hw.buf[8:])
-	h1 := hw.h1
-	h2 := hw.h2
-
-	k1 *= h64c1
-	k1 = (k1 << 31) | (k1 >> (64 - 31))
-	k1 *= h64c2
-	h1 ^= k1
-	h1 = (h1 << 27) | (h1 >> (64 - 27))
-	h1 += h2
-	h1 = h1*5 + 0x52dce729
-	k2 *= h64c2
-	k2 = (k2 << 33) | (k2 >> (64 - 33))
-	k2 *= h64c1
-	h2 ^= k2
-	h2 = (h2 << 31) | (h2 >> (64 - 31))
-	h2 += h1
-	h2 = h2*5 + 0x38495ab5
-
-	hw.h1 = h1
-	hw.h2 = h2
-}
-
+// Sum completes the hash and _appends_ the hash to the given input buffer
+// This is kept for backwards compatibility
 func (hw *HashWriter128) Sum(b []byte) []byte {
-	k1 := uint64(0)
-	k2 := uint64(0)
-	h1 := hw.h1
-	h2 := hw.h2
-	switch hw.index {
+	h1, h2 := hw.Sum128().Values()
+	var retbuf [8]byte
+	binary.LittleEndian.PutUint64(retbuf[:], h1)
+	b = append(b, retbuf[:]...)
+	binary.LittleEndian.PutUint64(retbuf[:], h2)
+	b = append(b, retbuf[:]...)
+	return b
+}
+
+// AddBytes adds the given bytes to the hash
+func (hw *HashWriter128) AddBytes(input []byte) {
+	chunkStart := 0 // The index in to the input where we will begin reading full chunks of data
+	inputLength := len(input)
+
+	hw.length += inputLength
+
+	// If there are bytes remaining in the tail, attempt to form
+	// a full block and process that first
+	if hw.tailLength > 0 {
+		bytesNeeded := h128BlockSize - hw.tailLength
+
+		// If the input isn't large enough to form a full block with the tail
+		// copy it in to the tail and return
+		if bytesNeeded > inputLength {
+			copy(hw.tail[hw.tailLength:], input)
+			hw.tailLength += inputLength
+			return
+		}
+
+		copy(hw.tail[hw.tailLength:], input[0:bytesNeeded])
+		chunkStart += bytesNeeded
+		inputLength -= bytesNeeded
+
+		k1Buf := hw.tail[0:8]
+		k2Buf := hw.tail[8:]
+
+		k1 := *(*uint64)(unsafe.Pointer(&k1Buf[0]))
+		k2 := *(*uint64)(unsafe.Pointer(&k2Buf[0]))
+
+		hw.h1, hw.h2 = merge128(hw.h1, hw.h2, k1, k2)
+	}
+
+	chunks := inputLength / h128BlockSize
+
+	if chunks > 0 {
+		chunkInput := input
+		if chunkStart > 0 {
+			chunkInput = input[chunkStart:]
+		}
+
+		values := (*(*[]uint64)(unsafe.Pointer(&chunkInput)))[: chunks*2 : chunks*2]
+		for i := 0; i < len(values); i += 2 {
+			hw.h1, hw.h2 = merge128(hw.h1, hw.h2, values[i], values[i+1])
+		}
+	}
+
+	tailLength := inputLength % h128BlockSize
+
+	hw.tailLength = tailLength
+
+	if tailLength == 0 {
+		return
+	}
+
+	// Copy remaining bytes in to tail
+	tailStart := inputLength - tailLength + chunkStart
+	copy(hw.tail[:], input[tailStart:])
+}
+
+// AddString adds the given string to the hash
+func (hw *HashWriter128) AddString(key string) {
+	if len(key) == 0 {
+		return
+	}
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&key))
+	byteSlice := (*[math.MaxInt32 - 1]byte)(unsafe.Pointer(sh.Data))[:sh.Len:sh.Len]
+	hw.AddBytes(byteSlice)
+}
+
+// Sum completes the hash value and returns it.  Reset should be called after calling Sum
+func (hw *HashWriter128) Sum128() Hash128Value {
+	h1, h2 := hw.h1, hw.h2
+	k1, k2 := uint64(0), uint64(0)
+
+	switch hw.tailLength {
 	case 15:
-		k2 ^= uint64(hw.buf[14]) << 48
+		k2 ^= uint64(hw.tail[14]) << 48
 		fallthrough
 	case 14:
-		k2 ^= uint64(hw.buf[13]) << 40
+		k2 ^= uint64(hw.tail[13]) << 40
 		fallthrough
 	case 13:
-		k2 ^= uint64(hw.buf[12]) << 32
+		k2 ^= uint64(hw.tail[12]) << 32
 		fallthrough
 	case 12:
-		k2 ^= uint64(hw.buf[11]) << 24
+		k2 ^= uint64(hw.tail[11]) << 24
 		fallthrough
 	case 11:
-		k2 ^= uint64(hw.buf[10]) << 16
+		k2 ^= uint64(hw.tail[10]) << 16
 		fallthrough
 	case 10:
-		k2 ^= uint64(hw.buf[9]) << 8
+		k2 ^= uint64(hw.tail[9]) << 8
 		fallthrough
 	case 9:
-		k2 ^= uint64(hw.buf[8])
+		k2 ^= uint64(hw.tail[8])
 		k2 *= h64c2
-		k2 = (k2 << 33) | (k2 >> (64 - 33))
+		k2 = bits.RotateLeft64(k2, 33)
 		k2 *= h64c1
 		h2 ^= k2
 		fallthrough
 	case 8:
-		k1 ^= uint64(hw.buf[7]) << 56
+		k1 ^= uint64(hw.tail[7]) << 56
 		fallthrough
 	case 7:
-		k1 ^= uint64(hw.buf[6]) << 48
+		k1 ^= uint64(hw.tail[6]) << 48
 		fallthrough
 	case 6:
-		k1 ^= uint64(hw.buf[5]) << 40
+		k1 ^= uint64(hw.tail[5]) << 40
 		fallthrough
 	case 5:
-		k1 ^= uint64(hw.buf[4]) << 32
+		k1 ^= uint64(hw.tail[4]) << 32
 		fallthrough
 	case 4:
-		k1 ^= uint64(hw.buf[3]) << 24
+		k1 ^= uint64(hw.tail[3]) << 24
 		fallthrough
 	case 3:
-		k1 ^= uint64(hw.buf[2]) << 16
+		k1 ^= uint64(hw.tail[2]) << 16
 		fallthrough
 	case 2:
-		k1 ^= uint64(hw.buf[1]) << 8
+		k1 ^= uint64(hw.tail[1]) << 8
 		fallthrough
 	case 1:
-		k1 ^= uint64(hw.buf[0])
+		k1 ^= uint64(hw.tail[0])
 		k1 *= h64c1
-		k1 = (k1 << 31) | (k1 >> (64 - 31))
+		k1 = bits.RotateLeft64(k1, 31)
 		k1 *= h64c2
 		h1 ^= k1
 	}
-	h1 ^= uint64(hw.written)
-	h2 ^= uint64(hw.written)
+
+	h1 ^= uint64(hw.length)
+	h2 ^= uint64(hw.length)
 	h1 += h2
 	h2 += h1
 	h1 ^= h1 >> 33
@@ -367,10 +384,29 @@ func (hw *HashWriter128) Sum(b []byte) []byte {
 	h2 ^= h2 >> 33
 	h1 += h2
 	h2 += h1
-	var retbuf [8]byte
-	binary.LittleEndian.PutUint64(retbuf[:], h1)
-	b = append(b, retbuf[:]...)
-	binary.LittleEndian.PutUint64(retbuf[:], h2)
-	b = append(b, retbuf[:]...)
-	return b
+
+	return Hash128Value{high: h1, low: h2}
+}
+
+// merge128 merges k1 and k2 with h1 and h2 and returns the updated (h1, h2) values
+func merge128(h1, h2, k1, k2 uint64) (uint64, uint64) {
+	k1 *= h64c1
+	k1 = bits.RotateLeft64(k1, 31)
+	k1 *= h64c2
+
+	h1 ^= k1
+	h1 = bits.RotateLeft64(h1, 27)
+	h1 += h2
+	h1 = h1*5 + 0x52dce729
+
+	k2 *= h64c2
+	k2 = bits.RotateLeft64(k2, 33)
+	k2 *= h64c1
+
+	h2 ^= k2
+	h2 = bits.RotateLeft64(h2, 31)
+	h2 += h1
+	h2 = h2*5 + 0x38495ab5
+
+	return h1, h2
 }
